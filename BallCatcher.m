@@ -8,27 +8,47 @@ classdef BallCatcher < handle
         ik
         weights
         lastConfig
+        firstConfig
+        model1
+        model2
+        anf
+        configSol_anf
     end
 
     methods
-        function self = BallCatcher(dhparams)
+        function self = BallCatcher()
             % Default DH parameters
             if ~exist('dhparams','var')
                 dhparams = [0         pi/2	  0 	pi/2;
-                            09.144	  0       0 	0;  % Basic 2d planar robot dh table
-                            09.144	  0       0 	0;
+                            0.9144	  0       0 	0;  % Basic 2d planar robot dh table
+                            0.9144	  0       0 	0;
                             0         0       0 	0];
             end
             self.dhparams = dhparams;
-            self.q_dot_1 = 1.5; %rad/s
-            self.q_dot_2 = 1.5; %rad/s
-            self.weights = [0.0025 0.0025 0.0025 0.01 0.01 0.01];
+            self.q_dot_1 = 2; %rad/s
+            self.q_dot_2 = 2; %rad/s
+            %self.weights = [0.0025 0.0025 0.0025 0.01 0.01 0.01];
+            self.weights = [0 0 0 0 .8 .8];
 
             % Create robot arm
             self.setupArm();
             % Set initial config
-            self.lastConfig = homeConfiguration(self.robot);
-            
+            self.firstConfig = homeConfiguration(self.robot);
+            self.firstConfig(1).JointPosition = 5*pi/8;
+            self.firstConfig(2).JointPosition = -5*pi/8;
+            self.lastConfig = self.firstConfig;
+
+            %setting up anfis
+            self.model1 = readfis('theta1_full_model_testing6.fis');
+            self.model2 = readfis('theta2_full_model_testing6.fis');
+            %model3 = readfis('theta3_full_model');
+
+            self.anf = ANFIS(5,150,0); 
+            field = 'JointPosition';
+            field2 = 'JointName';
+            self.configSol_anf = struct(field,{},field2,{});                
+            self.configSol_anf(1,1).JointName = "jnt2";
+            self.configSol_anf(1,2).JointName = "jnt3";
         end
         
         function setupArm(self)
@@ -41,12 +61,14 @@ classdef BallCatcher < handle
             jnt2 = robotics.Joint('jnt2','revolute');
             body3 = robotics.RigidBody('body3');
             jnt3 = robotics.Joint('jnt3','revolute');
+            %body4 = robotics.RigidBody('body4');
+            %jnt4 = robotics.Joint('jnt4','revolute');
             body4 = robotics.RigidBody('tool');
             jnt4 = robotics.Joint('jnt4','fixed');
             
             % addVisual(body2,"Mesh",'link_body.stl')
             
-            addCollision(body3,collisionCylinder(0.127,0.9144));
+%             addCollision(body3,collisionCylinder(0.127,0.9144));
 
             %Calculate transformation matrices for each joint
             setFixedTransform(jnt1,self.dhparams(1,:),'dh');
@@ -54,22 +76,26 @@ classdef BallCatcher < handle
             setFixedTransform(jnt2,self.dhparams(2,:),'dh');
             setFixedTransform(jnt3,self.dhparams(3,:),'dh');
             setFixedTransform(jnt4,self.dhparams(4,:),'dh');
+            %setFixedTransform(jnt5,self.dhparams(5,:),'dh');
             
             %Assign joints to each link body
             body1.Joint = jnt1;
             body2.Joint = jnt2;
             body3.Joint = jnt3;
             body4.Joint = jnt4;
+           %body5.Joint = jnt5;
             
             %Set limits of each joint
             jnt2.PositionLimits = [-pi pi];
             jnt3.PositionLimits = [-pi pi];
+            %jnt4.PositionLimits = [-pi pi];
         
             %Create each link's body within the robot structure
             addBody(self.robot,body1,'base')
             addBody(self.robot,body2,'body1')
             addBody(self.robot,body3,'body2')
             addBody(self.robot,body4,'body3')
+            %addBody(self.robot,body5,'body4')
 
             % Initialize inverse kinematics
             self.ik = inverseKinematics('RigidBodyTree',self.robot);
@@ -81,12 +107,22 @@ classdef BallCatcher < handle
             if algorithm == "ik"
                 tic;
                 [configSol,~] = self.ik('tool',trvec2tform(targetPos),self.weights,self.lastConfig);
+%                 targetPos
+%                 trvec2tform(targetPos)
+%                 self.getEndEffectorPos(configSol)
                 solTime = toc;
-            % ANFIS (TBD)
             else
                 tic;
-                configSol = homeConfiguration(self.robot); % implement ANFIS here
+                anfis_jntangle_1 = evaluate(self.anf,self.model1,targetPos(:,2:3));
+                anfis_jntangle_2 = evaluate(self.anf,self.model2,targetPos(:,2:3)); % implement ANFIS here
                 solTime = toc;
+                field = 'JointPosition';
+                field2 = 'JointName';
+                configSol = struct(field,{},field2,{});     
+                configSol(1,1).JointPosition = anfis_jntangle_1;
+                configSol(1,2).JointPosition = anfis_jntangle_2;
+                configSol(1,1).JointName = "jnt2";
+                configSol(1,2).JointName = "jnt3";
             end
         end
 
@@ -100,9 +136,9 @@ classdef BallCatcher < handle
             % Display actual ball
             scatter3(actualPos(1), actualPos(2), actualPos(3),'o','MarkerEdgeColor','r');
             % Set axis limits
-            xlim([-20 20]);
-            ylim([-20 20]);
-            zlim([-20 20]);
+            xlim([-20 3]);
+            ylim([-2 2]);
+            zlim([-2.5 4]);
             hold off
             % Pause to update graphics
             pause(.01);
